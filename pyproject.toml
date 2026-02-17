@@ -1,0 +1,10 @@
+[project]
+name = "lines-of-action-ai"
+version = "0.1.0"
+description = "AI for the Lines of Action game."
+authors = [
+  {name = "Adam Klepáč", email="djklepy@pm.me"}
+]
+requires-python = ">=3.13"
+dependencies = ["pygame", "pygame_sdl2", "loguru", "numpy"]
+readme = "README.md"

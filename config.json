@@ -1,0 +1,45 @@
+{
+  "screen": {
+    "width": 1280,
+    "height": 1280
+  },
+  "game": {
+    "fps": 60,
+    "board": {
+      "bg_color": [
+        48,
+        96,
+        48
+      ],
+      "line_color": [
+        10,
+        10,
+        10
+      ],
+      "highlight_color": [
+        152,
+        251,
+        152
+      ]
+    }
+  },
+  "objects": {
+    "stone": {
+      "margin": 20,
+      "black": {
+        "color": [
+          20,
+          20,
+          20
+        ]
+      },
+      "white": {
+        "color": [
+          210,
+          210,
+          210
+        ]
+      }
+    }
+  }
+}
