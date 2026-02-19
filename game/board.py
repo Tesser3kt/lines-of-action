@@ -1,5 +1,6 @@
 import numpy as np
 from loguru import logger
+from collections import deque
 
 
 class Board:
@@ -8,7 +9,7 @@ class Board:
     def __init__(self):
         # Empty board
         self.board = np.matrix([[0 for _ in range(8)] for _ in range(8)])
-        self.components = {"black": [], "white": []}
+        self.components = {1: [], -1: []}
 
     def __repr__(self):
         return str(self.board)
@@ -24,13 +25,13 @@ class Board:
         self.board[:, 0] = np.array([0] + [-1] * 6 + [0]).reshape(8, 1)
         self.board[:, -1] = np.array([0] + [-1] * 6 + [0]).reshape(8, 1)
 
-        # Add the newly created stones to components
-        self.components = {"black": [set(), set()], "white": [set(), set()]}
+        # Add the newly created stones to sets
+        self.components = {1: [set(), set()], -1: [set(), set()]}
         for i in range(1, 7):
-            self.components["black"][0].add((0, i))
-            self.components["black"][1].add((7, i))
-            self.components["white"][0].add((i, 0))
-            self.components["white"][1].add((0, i))
+            self.components[1][0].add((0, i))
+            self.components[1][1].add((7, i))
+            self.components[-1][0].add((i, 0))
+            self.components[-1][1].add((i, 7))
 
     def _row_sum(self, row_index: int) -> int:
         return np.sum([abs(x) for x in self.board[row_index]])
@@ -64,8 +65,41 @@ class Board:
 
         return sum
 
+    def get_stones(self, player: int) -> list[tuple[int, int]]:
+        """Gets the positions of all stones belonging to 'player'."""
+
+        stones = []
+        for row in range(8):
+            for col in range(8):
+                if self.board[row, col] == player:
+                    stones.append((row, col))
+
+        return stones
+
     def _is_on_board(self, row: int, col: int) -> bool:
         return 0 <= row < 8 and 0 <= col < 8
+
+    def _get_neighbors(self, row: int, col: int) -> set[tuple[int, int]]:
+        """Retrieves the board neighbors of a given cell."""
+        neighbors = set()
+        directions = [
+            (0, -1),
+            (1, -1),
+            (1, 0),
+            (1, 1),
+            (0, 1),
+            (-1, 1),
+            (-1, 0),
+            (-1, -1),
+        ]
+
+        pos = np.array([row, col])
+        for direction in directions:
+            new_row, new_col = tuple(pos + np.array(direction))
+            if self._is_on_board(new_row, new_col):
+                neighbors.add((new_row, new_col))
+
+        return neighbors
 
     def _jumps_over_enemy(self, source: tuple, target: tuple, player: int) -> bool:
         source = np.array(source)
@@ -88,7 +122,7 @@ class Board:
         if self.board[row, col] == 0:
             return set()
 
-        logger.debug("Calculating possible moves for stone on ({}, {}).", col, row)
+        logger.debug("Calculating possible moves for stone on ({}, {}).", row, col)
         player = self.board[row, col]
         available_moves = set()
         possible_moves = set()
@@ -125,29 +159,269 @@ class Board:
 
             logger.debug(
                 "Stone on ({}, {}) can move to ({}, {}).",
-                col,
                 row,
-                target_col,
+                col,
                 target_row,
+                target_col,
             )
             available_moves.add((target_row, target_col))
 
         return available_moves
+
+    def _check_components(self, player: int) -> bool:
+        """Checks the correctness of components for player. Not to be used in
+        production."""
+        raise NotImplementedError("This shouldn't be used in production!")
+
+        stones = self.get_stones(player)
+
+        stone_components = {}
+        for stone in stones:
+            stone_components[stone] = 0
+
+        for stone in stones:
+            for component in self.components[player]:
+                if stone in component:
+                    stone_components[stone] += 1
+
+        for stone in stone_components:
+            if stone_components[stone] < 1:
+                logger.error("Stone ({}, {}) doesn't appear in any component.", *stone)
+                raise Exception("A stone doesn't have a component!")
+            if stone_components[stone] > 1:
+                logger.error(
+                    "Stone ({}, {}) appears in more than one component.", *stone
+                )
+                raise Exception("A stone has too many components!")
+
+    def _update_component(self, component: set, player: int) -> list[set]:
+        """Updates the given component, possibly splitting it into more."""
+        logger.debug("Updating component {}.", " -- ".join([str(t) for t in component]))
+        new_components = []
+
+        # Do BFS on the component, appending a new component whenever q
+        # empties until all elements have been added to some component.
+        while component:
+            current_component = set()
+            q = deque()
+            first = list(component)[0]
+            q.append(first)
+            visited = set([first])
+
+            while q:
+                row, col = q.popleft()
+                logger.debug("Got ({}, {}) from queue.", row, col)
+                current_component.add((row, col))
+
+                neighbors = self._get_neighbors(row, col)
+                for nrow, ncol in component:
+                    if (nrow, ncol) not in neighbors:
+                        continue
+
+                    if (nrow, ncol) in visited:
+                        continue
+
+                    q.append((nrow, ncol))
+                    visited.add((nrow, ncol))
+
+            new_components.append(current_component.copy())
+            component = component.difference(current_component)
+
+        logger.debug("The new components are {}.", new_components)
+        return new_components
+
+    def _get_component(self, row: int, col: int, player: int) -> int:
+        """Returns the index of the component the given stone belongs to.
+        Returns -1 if not found (shouldn't happen)."""
+
+        logger.debug("Searching for the component of stone ({}, {})", row, col)
+
+        for index, component in enumerate(self.components[player]):
+            if (row, col) in component:
+                return index
+
+        logger.error("Component not found for stone ({}, {})", row, col)
+        raise Exception(f"Component not found for stone {(row, col)}")
+
+    def _add_stone(self, row: int, col: int, player: int) -> list[int]:
+        """Updates components that change as a result of adding this stone.
+        Returns a list of indices of components whereto it belongs. These
+        should be united into one."""
+
+        logger.debug("Adding stone ({}, {}).", row, col)
+        component_indices = set()
+
+        for neighbor in self._get_neighbors(row, col):
+            if self.board[*neighbor] != player:
+                continue
+
+            logger.warning(
+                "Stone ({}, {}) is a neighbor of ({}, {})", *neighbor, row, col
+            )
+            index = self._get_component(*neighbor, player)
+            component_indices.add(index)
+
+        return component_indices
+
+    def _remove_stone(self, row: int, col: int, player: int) -> None:
+        """Removes stone from its component."""
+
+        logger.debug(
+            "Removing stone ({}, {}) from the list of components of player {}.",
+            row,
+            col,
+            player,
+        )
+        for index, component in enumerate(self.components[player]):
+            if (row, col) in component:
+                component.remove((row, col))
+
+                # If the component was emptied, remove it.
+                if len(component) == 0:
+                    self.components[player].pop(index)
+                    return
+
+                # Otherwise update it.
+                new_components = self._update_component(component, player)
+                self.components[player][index] = new_components[0]
+                for component in new_components[1:]:
+                    self.components[player].append(component)
+
+    def _list_component(self, component: set, player: int) -> set:
+        """Give a component as a list of connection between neighboring stones."""
+
+        # Find a stone with minimal number of neighbors
+        connections = []
+
+        for stone in component:
+            for nstone in self._get_neighbors(*stone):
+                if self.board[*nstone] == player:
+                    connections.append((stone, nstone))
+
+        return connections
+
+    def get_player_components(self, player: int) -> list[list]:
+        """Returns components of the given player."""
+
+        player_components = []
+        for component in self.components[player]:
+            player_components.append(self._list_component(component, player))
+
+        return player_components
+
+    def _remove_components_at(self, indices: set[int], player: int) -> None:
+        """Removes components of a given player on specified indices."""
+
+        new_components = []
+        for index, component in enumerate(self.components[player]):
+            if index in indices:
+                continue
+
+            new_components.append(component)
+        self.components[player] = new_components
+
+    def _pretty_print_components(self):
+        print("-" * 10 + " Black " + "-" * 10)
+        for component in self.components[1]:
+            print(" -- ".join([str(t) for t in component]))
+        print("-" * 10 + " White " + "-" * 10)
+        for component in self.components[-1]:
+            print(" -- ".join([str(t) for t in component]))
 
     def move_stone(self, source: tuple, target: tuple) -> None:
         """Moves a stone from source to target coordinates. If there is no
         stone on source coordinates, exits. Doesn't check move validity!
         Returns success or failure."""
         logger.debug("Moving stone from {} to {}.", source, target)
+
+        # Forbid moves out of board bounds
         if not self._is_on_board(*source) or not self._is_on_board(*target):
             return False
 
+        # Forbid illegal moves
         if self.board[*source] == 0:
             return False
 
-        self.board[*target] = self.board[*source]
+        # Do nothing for "static" moves.
+        if source == target:
+            return True
+
+        # Get active player.
+        player = self.board[*source]
+
+        # Remove enemy stone if any.
+        removed_enemy_stone = self.board[*target] != 0
+        self.board[*target] = 0
+
+        # Update opponent's components if opponent's stone was removed by this move.
+        if removed_enemy_stone:
+            logger.debug("Enemy stone on {} removed.", target)
+            self._remove_stone(*target, -player)
+
+        # Remove player's stone.
         self.board[*source] = 0
 
-        # TODO update components
+        # Update component that changes by removal of this stone
+        self._remove_stone(*source, player)
+
+        # Add player's stone to new position
+        self.board[*target] = player
+
+        # Merge components that unite as a result of adding this stone
+        indices_to_merge = self._add_stone(*target, player)
+
+        # If there are no indices, the stone is isolated
+        if len(indices_to_merge) == 0:
+            logger.debug("Adding {} to its new component.", target)
+            self.components[player].append(set([target]))
+        else:
+            # Otherwise join the given components
+            logger.debug("Joining components {}.", indices_to_merge)
+            new_component = set()
+            for index in indices_to_merge:
+                new_component = new_component.union(
+                    self.components[player][index].copy()
+                )
+            new_component.add(target)
+            logger.debug("The new component is {}.", new_component)
+            self._remove_components_at(indices_to_merge, player)
+
+            # Add the new stone to the final union
+            self.components[player].append(new_component)
 
         return True
+
+    def game_over(self) -> int:
+        """Returns the indicator of the victor, 0 if the game isn't over yet."""
+        if len(self.components[1]) == 1:
+            return 1
+        if len(self.components[-1]) == 1:
+            return -1
+
+        return 0
+
+    def reset(self) -> None:
+        """Resets the board to initial state."""
+        logger.debug("Resetting board...")
+        for row in range(8):
+            for col in range(8):
+                self.board[row, col] = 0
+
+        self.components = {1: [], -1: []}
+        self.board.initialise()
+
+    def _stone_distance(self, s1: tuple[int, int], s2: tuple[int, int]) -> int:
+        """Returns the 'generalised Manhattan' distance between two stones."""
+        return max(abs(s1[0] - s2[0]), abs(s1[1] - s2[1]))
+
+    def _get_component_distance(self, c1: set, c2: set) -> int:
+        """Returns the distance between components as the minimal of the
+        distance between their elements."""
+
+        distance = float.INF
+        for s1 in c1:
+            for s2 in c2:
+                if (test_distance := self._stone_distance(s1, s2)) < distance:
+                    distance = test_distance
+
+        return distance

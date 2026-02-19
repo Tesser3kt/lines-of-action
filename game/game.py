@@ -24,7 +24,7 @@ class Game:
         self.tile = None
         self.highlight_rect = None
         self.current_highlight_rects = pg.sprite.RenderUpdates()
-        self.cells_to_redraw = set()
+        self.available_moves = set()
 
     def _init_board(self) -> None:
         """Initialises the game board."""
@@ -96,6 +96,19 @@ class Game:
             if stone:
                 self.screen.blit(stone.image, stone.rect)
 
+    @property
+    def _all_stones(self) -> list[tuple[int, Stone]]:
+        """Returns all placed stones as tuples (position, stone)."""
+        stones = []
+        for pos, stone in self.black_stones.items():
+            if stone:
+                stones.append((pos, stone))
+        for pos, stone in self.white_stones.items():
+            if stone:
+                stones.append((pos, stone))
+
+        return stones
+
     def _highlight_cell(self, row: int, col: int) -> None:
         """Highlights a cell given its board coordinates."""
         highlight_color = self.config["game"]["board"]["highlight_color"]
@@ -105,16 +118,33 @@ class Game:
             width=self.cell_width - 4,
             height=self.cell_height - 4,
         )
-        highlight_rect.move(col * self.cell_width + 2, row * self.cell_height + 2)
+        highlight_rect.move_to(col * self.cell_width + 2, row * self.cell_height + 2)
         self.current_highlight_rects.add(highlight_rect)
 
-    def clear_available_moves(self) -> None:
-        """Clears highlighted cells with availables moves. Redraws affected stones."""
+    def clear_available_moves(self) -> list[pg.Rect]:
+        """Clears highlighted cells with availables moves if any. Redraws
+        affected stones. Returns list of affected rects."""
+        if not self.current_highlight_rects:
+            return []
+
         bg_color = self.config["game"]["board"]["bg_color"]
         clear_bg = pg.Surface((self.width, self.height))
         clear_bg.fill(tuple(bg_color))
 
+        logger.debug(
+            "Clearing current highlight rects from {}.", self.current_highlight_rects
+        )
+
+        # Get all highlighted rects positions
+        rects = [h.rect for h in self.current_highlight_rects]
+
+        # Clear highlighted rects
         self.current_highlight_rects.clear(self.screen, clear_bg)
+        self.current_highlight_rects.empty()
+        rects += self._redraw_stones(self.available_moves)
+        self.available_moves = set()
+
+        return rects
 
     def _redraw_stones(self, cells: list) -> list[pg.Rect]:
         """Redraws stones given list of cells. Returns affected rects."""
@@ -123,10 +153,12 @@ class Game:
         # Get rects with stones that have to be redrawn
         prev_stone_rects = []
         for rrow, rcol in cells:
-            if self.white_stones[(rrow, rcol)]:
-                prev_stone_rects.append(self.white_stones[(rrow, rcol)]).rect
-            if self.black_stones[(rrow, rcol)]:
-                prev_stone_rects.append(self.black_stones[(rrow, rcol)]).rect
+            if self.white_stones[(rrow, rcol)] is not None:
+                prev_stone_rects.extend(self.move_stone((rrow, rcol), (rrow, rcol)))
+            if self.black_stones[(rrow, rcol)] is not None:
+                prev_stone_rects.extend(self.move_stone((rrow, rcol), (rrow, rcol)))
+
+        return prev_stone_rects
 
     def prepare(self) -> None:
         """Prepares the board for first move."""
@@ -134,6 +166,11 @@ class Game:
         self._init_board()
         self._draw_board()
         self._place_initial_stones()
+
+    def _redraw_all_stones(self) -> None:
+        """Redraws all stones (for debugging purposes only)."""
+        # raise NotImplementedError("This shouldn't be used in production!")
+        self._redraw_stones([pos for (pos, stone) in self._all_stones])
 
     @logger.catch(message="Failed to move stone.")
     def move_stone(self, source: tuple, target: tuple) -> list[pg.Rect]:
@@ -163,14 +200,24 @@ class Game:
             clear_bg,
             stones[*source].rect.move(2, 2),
         )
-        affected_rects.append(stones[*source].rect)
-
-        # Move stone in dict
-        stones[*target] = Stone(stone_color, self.cell_width, self.cell_height, margin)
-        stones[*target].move_to(
-            target[1] * self.cell_width, target[0] * self.cell_height
+        affected_rects.append(
+            pg.Rect(
+                stones[*source].rect.x,
+                stones[*source].rect.y,
+                self.cell_width - 4,
+                self.cell_height - 4,
+            )
         )
-        stones[*source] = None
+
+        # Move stone in dict is source != target.
+        if source != target:
+            stones[*target] = Stone(
+                stone_color, self.cell_width, self.cell_height, margin
+            )
+            stones[*target].move_to(
+                target[1] * self.cell_width, target[0] * self.cell_height
+            )
+            stones[*source] = None
 
         # Blit the stone to new cell
         self.screen.blit(stones[*target].image, stones[*target].rect)
@@ -178,18 +225,77 @@ class Game:
 
         return affected_rects
 
+    @logger.catch(message="Error retrieving stone.")
+    def get_stone(self, pos: tuple, player: int) -> Stone or None:
+        if player == 1:
+            return self.black_stones[pos]
+        else:
+            return self.white_stones[pos]
+
     def highlight_available_moves(self, row: int, col: int) -> list[pg.Rect]:
         logger.debug("Highlighting available moves for stone on ({}, {})", col, row)
 
-        # Clear previously highlighted moves
-        self.clear_available_moves()
-        self.current_highlight_rects.empty()
+        # Calculate available moves and save them for later redrawing
+        self.available_moves = self.board.get_available_moves(row, col)
 
-        # Calculate available moves
-        available_moves = self.board.get_available_moves(row, col)
-        self.cells_to_redraw = available_moves
-
-        for target_row, target_col in available_moves:
+        for target_row, target_col in self.available_moves:
             self._highlight_cell(target_row, target_col)
 
         return self.current_highlight_rects.draw(self.screen)
+
+    def get_clicked_stone_pos(self, pos: tuple) -> tuple[int, int] or None:
+        """Returns the board positions of a clicked stone."""
+        logger.debug("Getting clicked stone for mouse position {}.", pos)
+        for stone_pos, stone in self._all_stones:
+            if stone.rect.collidepoint(pos):
+                return stone_pos
+
+        return None
+
+    def get_clicked_highlight(self, mouse_pos: tuple) -> tuple[int, int] or None:
+        """Returns the position of the clicked highlighted rectangle, if any.
+        Otherwise None."""
+
+        board_pos = None
+
+        # Check if the clicked position is highlighted
+        for highlight_rect in self.current_highlight_rects:
+            if highlight_rect.rect.collidepoint(mouse_pos):
+                # Calculate highlight rect position
+                board_pos = (
+                    highlight_rect.rect.y // self.cell_height,
+                    highlight_rect.rect.x // self.cell_width,
+                )
+                if board_pos in self.available_moves:
+                    break
+
+        return board_pos
+
+    def game_over(self) -> int:
+        """Calls the 'game_over' method of Board."""
+        return self.board.game_over()
+
+    def _draw_connection(
+        self, source: tuple, target: tuple, color: tuple[int, int, int]
+    ) -> None:
+        """Draws a connecting line between two cells."""
+        source_center = (
+            source[1] * self.cell_width + self.cell_width // 2,
+            source[0] * self.cell_height + self.cell_height // 2,
+        )
+        target_center = (
+            target[1] * self.cell_width + self.cell_width // 2,
+            target[0] * self.cell_height + self.cell_height // 2,
+        )
+
+        pg.draw.line(self.screen, color, source_center, target_center, width=8)
+
+    def _draw_component(self, component: list, color: tuple[int, int, int]):
+        """Draws connections between neighbors in a given component."""
+        for s1, s2 in component:
+            self._draw_connection(s1, s2, color)
+
+    def mark_components(self, player: int, color: tuple[int, int, int]) -> None:
+        """Marks in given color all  components of the given player."""
+        for component in self.board.get_player_components(player):
+            self._draw_component(component, color)
