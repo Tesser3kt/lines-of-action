@@ -46,5 +46,17 @@
         ]
       }
     }
+  },
+  "ai": {
+    "reward_coef": {
+      "block": 0.25,
+      "enemy_sum": 0.5,
+      "player_sum": 1
+    }
+  },
+  "agent": {
+    "max_memory": 100_000,
+    "batch_size": 1000,
+    "learning_rate": 0.001
   }
 }

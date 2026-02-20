@@ -9,6 +9,14 @@
     pyproject-nix,
     ...
   }: let
+    system = "x86_64-linux";
+    pkgs = import nixpkgs {
+      inherit system;
+      config = {
+        rocmSupport = true;
+        allowUnfree = true;
+      };
+    };
     # Loads pyproject.toml into a high-level project representation
     # Do you notice how this is not tied to any `system` attribute or package sets?
     # That is because `project` refers to a pure data representation.
@@ -17,9 +25,6 @@
       # projectRoot is also used to set `src` for renderers such as buildPythonPackage.
       projectRoot = ./.;
     };
-
-    # This example is only using x86_64-linux
-    pkgs = nixpkgs.legacyPackages.x86_64-linux;
 
     # We are using the default nixpkgs Python3 interpreter & package set.
     #
@@ -32,7 +37,11 @@
     #
     # Or use an overlay generator such as uv2nix:
     # https://github.com/pyproject-nix/uv2nix
-    python = pkgs.python3;
+    python = pkgs.python3.override {
+      packageOverrides = self: super: {
+        torch = pkgs.python3.pkgs.torchWithRocm;
+      };
+    };
   in {
     # Create a development shell containing dependencies from `pyproject.toml`
     devShells.x86_64-linux.default = let
@@ -52,6 +61,6 @@
     in
       # Pass attributes to buildPythonPackage.
       # Here is a good spot to add on any missing or custom attributes.
-      python.pkgs.buildPythonPackage (attrs // {env.CUSTOM_ENVVAR = "hello";});
+      python.pkgs.buildPythonPackage (attrs // {env.LD_LIBRARY_PATH = "/run/opengl-driver/lib/";});
   };
 }

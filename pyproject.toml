@@ -6,5 +6,8 @@ authors = [
   {name = "Adam Klepáč", email="djklepy@pm.me"}
 ]
 requires-python = ">=3.13"
-dependencies = ["pygame", "pygame_sdl2", "loguru", "numpy"]
+dependencies = ["pygame", "pygame_sdl2", "loguru", "numpy", "networkx", "torch"]
 readme = "README.md"
+
+[tool.setuptools]
+packages = ["ai", "game"]

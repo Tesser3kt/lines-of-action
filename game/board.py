@@ -1,10 +1,12 @@
 import numpy as np
+import networkx as nx
 from loguru import logger
 from collections import deque
 
 
 class Board:
-    """Game board class. Supports movement of stones, checks victory conditions and stores board data."""
+    """Game board class. Supports movement of stones, checks victory conditions
+    and stores board data."""
 
     def __init__(self):
         # Empty board
@@ -117,7 +119,9 @@ class Board:
 
         return False
 
-    def get_available_moves(self, row: int, col: int) -> set:
+    def get_available_moves(
+        self, row: int, col: int, ignore_collision: bool = False
+    ) -> set:
         """Calculates the available moves for the stone on position (col, row)."""
         if self.board[row, col] == 0:
             return set()
@@ -154,7 +158,10 @@ class Board:
             if self.board[target_row, target_col] == player:
                 continue
 
-            if self._jumps_over_enemy((row, col), (target_row, target_col), player):
+            if (
+                self._jumps_over_enemy((row, col), (target_row, target_col), player)
+                and not ignore_collision
+            ):
                 continue
 
             logger.debug(
@@ -255,9 +262,6 @@ class Board:
             if self.board[*neighbor] != player:
                 continue
 
-            logger.warning(
-                "Stone ({}, {}) is a neighbor of ({}, {})", *neighbor, row, col
-            )
             index = self._get_component(*neighbor, player)
             component_indices.add(index)
 
@@ -408,7 +412,7 @@ class Board:
                 self.board[row, col] = 0
 
         self.components = {1: [], -1: []}
-        self.board.initialise()
+        self.initialise()
 
     def _stone_distance(self, s1: tuple[int, int], s2: tuple[int, int]) -> int:
         """Returns the 'generalised Manhattan' distance between two stones."""
@@ -418,10 +422,84 @@ class Board:
         """Returns the distance between components as the minimal of the
         distance between their elements."""
 
-        distance = float.INF
+        distance = 100
         for s1 in c1:
             for s2 in c2:
                 if (test_distance := self._stone_distance(s1, s2)) < distance:
                     distance = test_distance
 
         return distance
+
+    def cum_distance(self, player: int) -> int:
+        """Calculates the cumulative distance between the player's components.
+        Only distances between components that are closest are counted.
+        Basically length of a minimal spanning tree."""
+
+        logger.debug("Calculating cumulative distance for player {}.", player)
+        # Calculate distances between each pair of components
+        distances = {
+            (i1, i2): self._get_component_distance(c1, c2) if i1 != i2 else 0
+            for (i1, c1) in enumerate(self.components[player])
+            for (i2, c2) in enumerate(self.components[player])
+        }
+
+        # Create graph of components
+        comp_graph = nx.Graph()
+
+        # Add edges of weight=distance
+        for (i1, i2), d in distances.items():
+            comp_graph.add_edge(i1, i2, weight=d)
+
+        spanning_tree = nx.minimum_spanning_tree(comp_graph)
+        return sum(data.get("weight") for *_, data in spanning_tree.edges(data=True))
+
+    def _get_interacting_stones(self, stone: tuple) -> list[tuple]:
+        """Retrieves all stones that could potentially interact (be on the same diagonal,
+        horizontal or vertical line) as the given stone."""
+
+        directions = [
+            (0, 1),
+            (1, 0),
+            (1, 1),
+            (-1, 0),
+            (0, -1),
+            (-1, -1),
+            (-1, 1),
+            (1, -1),
+        ]
+
+        interacting_stones = []
+        for dir in directions:
+            new_pos = (stone[0] + dir[0], stone[1] + dir[1])
+            while self._is_on_board(*new_pos):
+                if self.board[*new_pos] != 0:
+                    interacting_stones.append(new_pos)
+                new_pos = (new_pos[0] + dir[0], new_pos[1] + dir[1])
+
+        return interacting_stones
+
+    def get_blocked_moves(self, stone: int, player: int) -> list[tuple]:
+        """Calculates the moves that were blocked by introduction of this 'stone' by 'player'."""
+
+        logger.debug(
+            "Calculating blocked moves by the placement of ({}, {}) by {}.",
+            *stone,
+            player,
+        )
+        # Temporarily change stone to opponent's
+        self.board[*stone] = -player
+
+        # Calculate current available moves for interacting stones
+        istones = self._get_interacting_stones(stone)
+        total_available_moves = 0
+        for istone in istones:
+            available_moves = self.get_available_moves(*istone)
+            total_available_moves += len(available_moves)
+
+        # Change stone back to player's
+        self.board[*stone] = player
+        for istone in istones:
+            available_moves = self.get_available_moves(*istone)
+            total_available_moves -= len(available_moves)
+
+        return total_available_moves
