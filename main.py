@@ -11,7 +11,6 @@ import sys
 import time
 from loguru import logger
 from game.game import Game
-from ai.ai import AI
 from game.board import Board
 
 

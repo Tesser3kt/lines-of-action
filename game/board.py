@@ -119,9 +119,23 @@ class Board:
 
         return False
 
+    def get_all_player_moves(
+        self, player: int, ignore_collision: bool = False
+    ) -> set[tuple[int, int]]:
+        """Calculates all the possible moves that a given player can make as tuples source -> target."""
+        logger.debug("Calculating all moves for player {}...", player)
+
+        possible_moves = set()
+        for row in range(8):
+            for col in range(8):
+                possible_moves = possible_moves.union(
+                    self.get_available_moves(row, col, ignore_collision)
+                )
+        return possible_moves
+
     def get_available_moves(
         self, row: int, col: int, ignore_collision: bool = False
-    ) -> set:
+    ) -> set[tuple[int, int]]:
         """Calculates the available moves for the stone on position (col, row)."""
         if self.board[row, col] == 0:
             return set()

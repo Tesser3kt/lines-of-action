@@ -7,7 +7,6 @@ from loguru import logger
 from copy import deepcopy
 from game.board import Board
 from game.objects import GameObject, Stone
-from ai.ai import AI
 
 
 class Game:
