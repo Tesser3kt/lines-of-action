@@ -517,3 +517,14 @@ class Board:
             total_available_moves -= len(available_moves)
 
         return total_available_moves
+
+    def copy(self) -> "Board":
+        """Returns a copy of this board."""
+        new_board = Board()
+        new_board.board = self.board.copy()
+        new_board.components = {
+            1: self.components[1].copy(),
+            -1: self.components[-1].copy(),
+        }
+
+        return new_board

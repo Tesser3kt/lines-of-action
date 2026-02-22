@@ -12,6 +12,8 @@ import time
 from loguru import logger
 from game.game import Game
 from game.board import Board
+from ai.mcts import MCTS
+from ai.state import State
 
 
 @logger.catch(message="Pygame initialisation failed.")
@@ -48,73 +50,78 @@ def main(config: dict) -> None:
     # currently clicked stone
     active_stone = None
 
-    # Play AI random game to find bugs
-    game.play_ai_game(3)
+    # Try MCTS search
+    args = {"C": np.sqrt(2), "num_searches": 5}
+    mcts = MCTS(board=game.board, args=args)
 
-    # while running:
-    #     # store rects to be redrawn this frame
-    #     rects_to_redraw = []
-    #
-    #     # poll for events
-    #     for event in pg.event.get():
-    #         # Check quit event
-    #         if event.type == pg.QUIT:
-    #             logger.info("Quit signal received. Exiting...")
-    #             running = False
-    #         # Check mouse click
-    #         if event.type == pg.MOUSEBUTTONDOWN:
-    #             logger.debug("Mouse click signal received.")
-    #             if event.button == 1:
-    #                 # If a stone is active check if player clicked any of the
-    #                 # highlighted positions.
-    #                 if active_stone:
-    #                     clicked_highlight = game.get_clicked_highlight(event.pos)
-    #                     if clicked_highlight:
-    #                         logger.info(
-    #                             "Performing stone move from {} to {}",
-    #                             active_stone,
-    #                             clicked_highlight,
-    #                         )
-    #                         rects_to_redraw += game.move_stone(
-    #                             active_stone, clicked_highlight
-    #                         )
-    #                         active_stone = None
-    #
-    #                         # Check possible victory
-    #                         if (victor := game.game_over()) != 0:
-    #                             logger.debug("Player {} has won the game!", victor)
-    #                             game.mark_components(
-    #                                 victor, config["game"]["board"]["connection_color"]
-    #                             )
-    #                             time.sleep(10)
-    #                             running = False
-    #                             break
-    #
-    #                         logger.debug(
-    #                             "Switching player from {} to {}.", player, -player
-    #                         )
-    #                         player = -player
-    #
-    #                 # Otherwise clear any previous highlights
-    #                 rects_to_redraw += game.clear_available_moves()
-    #
-    #                 # Get the clicked stone
-    #                 clicked_stone = game.get_clicked_stone_pos(event.pos)
-    #                 if clicked_stone:
-    #                     logger.debug("Stone {} clicked.", clicked_stone)
-    #
-    #                     # Highlight available moves
-    #                     if game.board.board[*clicked_stone] == player:
-    #                         logger.debug("Marking stone {} as active.", clicked_stone)
-    #                         active_stone = clicked_stone
-    #                         rects_to_redraw += game.highlight_available_moves(
-    #                             *clicked_stone
-    #                         )
-    #     if running:
-    #         pg.display.update(rects_to_redraw)
-    #
-    #     # fps
-    #     clock.tick(config["game"]["fps"])
+    while running:
+        # store rects to be redrawn this frame
+        rects_to_redraw = []
+
+        if player == -1:
+            state = State(player=player, board=game.board)
+            mcts_probs = mcts.search(state=state)
+
+        # poll for events
+        for event in pg.event.get():
+            # Check quit event
+            if event.type == pg.QUIT:
+                logger.info("Quit signal received. Exiting...")
+                running = False
+            # Check mouse click
+            if event.type == pg.MOUSEBUTTONDOWN:
+                logger.debug("Mouse click signal received.")
+                if event.button == 1:
+                    # If a stone is active check if player clicked any of the
+                    # highlighted positions.
+                    if active_stone:
+                        clicked_highlight = game.get_clicked_highlight(event.pos)
+                        if clicked_highlight:
+                            logger.info(
+                                "Performing stone move from {} to {}",
+                                active_stone,
+                                clicked_highlight,
+                            )
+                            rects_to_redraw += game.move_stone(
+                                active_stone, clicked_highlight
+                            )
+                            active_stone = None
+
+                            # Check possible victory
+                            if (victor := game.game_over()) != 0:
+                                logger.debug("Player {} has won the game!", victor)
+                                game.mark_components(
+                                    victor, config["game"]["board"]["connection_color"]
+                                )
+                                time.sleep(10)
+                                running = False
+                                break
+
+                            logger.debug(
+                                "Switching player from {} to {}.", player, -player
+                            )
+                            player = -player
+
+                    # Otherwise clear any previous highlights
+                    rects_to_redraw += game.clear_available_moves()
+
+                    # Get the clicked stone
+                    clicked_stone = game.get_clicked_stone_pos(event.pos)
+                    if clicked_stone:
+                        logger.debug("Stone {} clicked.", clicked_stone)
+
+                        # Highlight available moves
+                        if game.board.board[*clicked_stone] == player:
+                            logger.debug("Marking stone {} as active.", clicked_stone)
+                            active_stone = clicked_stone
+                            rects_to_redraw += game.highlight_available_moves(
+                                *clicked_stone
+                            )
+        if running:
+            pg.display.update(rects_to_redraw)
+
+        # fps
+        clock.tick(config["game"]["fps"])
 
     pg.quit()
 

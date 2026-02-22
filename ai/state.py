@@ -7,8 +7,7 @@ class State:
 
     def __init__(self, player: int, board: Board):
         self.player = player
-        self.board = board
-        self.board.board = board.board.copy()
+        self.board = board.copy()
         self.row_count, self.col_count = board.board.shape
 
     def to_vector(self) -> np.array:
