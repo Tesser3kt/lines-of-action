@@ -221,7 +221,14 @@ class Game:
 
         # Blit the stone to new cell
         self.screen.blit(stones[*target].image, stones[*target].rect)
-        affected_rects.append(stones[*target].rect)
+        affected_rects.append(
+            pg.Rect(
+                stones[*target].rect.x,
+                stones[*target].rect.y,
+                self.cell_width - 4,
+                self.cell_height - 4,
+            )
+        )
 
         return affected_rects
 
@@ -299,54 +306,3 @@ class Game:
         """Marks in given color all  components of the given player."""
         for component in self.board.get_player_components(player):
             self._draw_component(component, color)
-
-    def play_ai_game(self, repeats: int) -> None:
-        """Plays a game of AI against AI."""
-        logger.debug("Playing AI game...")
-        self.board.initialise()
-
-        running = True
-        player = 1
-
-        ai_players = {
-            1: AI(self.board, self.config, 1),
-            -1: AI(self.board, self.config, -1),
-        }
-
-        game_repeats = 0
-        while game_repeats < repeats:
-            logger.debug("Repeat number {}.", game_repeats)
-            self.board.reset()
-
-            logger.debug("Starting game...")
-            game_repeats += 1
-            running = True
-            while running:
-                # Reset reward for move
-                reward = 0
-
-                logger.warning("Before move: \n" + str(self.board))
-                # Predict a move
-                source, target = ai_players[player].predict_move()
-                self.board.move_stone(source, target)
-                logger.warning("After move: \n" + str(self.board))
-
-                # Calculate reward
-                reward += ai_players[player].get_cum_distance_reward()
-                reward += ai_players[player].get_avail_moves_reward(target)
-
-                logger.debug(
-                    "Reward for move ({}, {}) as player {}: {}",
-                    source,
-                    target,
-                    player,
-                    reward,
-                )
-
-                if (victor := self.game_over()) != 0:
-                    logger.debug("Player {} won. Exiting...", victor)
-                    running = False
-                    # TODO reward for winning
-
-                # Switch players
-                player = -player

@@ -2,6 +2,7 @@ import numpy as np
 import networkx as nx
 from loguru import logger
 from collections import deque
+from copy import deepcopy
 
 
 class Board:
@@ -128,9 +129,12 @@ class Board:
         possible_moves = set()
         for row in range(8):
             for col in range(8):
-                possible_moves = possible_moves.union(
-                    self.get_available_moves(row, col, ignore_collision)
-                )
+                if self.board[row, col] != player:
+                    continue
+
+                for move in self.get_available_moves(row, col, ignore_collision):
+                    possible_moves.add(((row, col), move))
+
         return possible_moves
 
     def get_available_moves(
@@ -523,8 +527,8 @@ class Board:
         new_board = Board()
         new_board.board = self.board.copy()
         new_board.components = {
-            1: self.components[1].copy(),
-            -1: self.components[-1].copy(),
+            1: deepcopy(self.components[1]),
+            -1: deepcopy(self.components[-1]),
         }
 
         return new_board
