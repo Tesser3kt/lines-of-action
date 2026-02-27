@@ -460,13 +460,16 @@ class Board:
             for (i1, c1) in enumerate(self.components[player])
             for (i2, c2) in enumerate(self.components[player])
         }
+        node_weights = {i: len(comp) for i, comp in enumerate(self.components[player])}
 
         # Create graph of components
         comp_graph = nx.Graph()
 
-        # Add edges of weight=distance
+        # Add edges of weight=distance + comp. size factor
         for (i1, i2), d in distances.items():
-            comp_graph.add_edge(i1, i2, weight=d)
+            comp_graph.add_edge(
+                i1, i2, weight=d + 0.5 * (node_weights[i1] + node_weights[i2])
+            )
 
         spanning_tree = nx.minimum_spanning_tree(comp_graph)
         return sum(data.get("weight") for *_, data in spanning_tree.edges(data=True))
@@ -532,3 +535,21 @@ class Board:
         }
 
         return new_board
+
+    def evaluate(self, player: int) -> int:
+        """Evaluates the board for given player. The higher the cum_distance, the worse the evaluation."""
+        return 1 / (1 + self.cum_distance(player))
+
+    def change_perspective(self) -> None:
+        """Changes the perspective of the board as if player was black. That
+        is, multiplies the board by 'player' and transposes it."""
+        logger.debug("Changing perspective...")
+
+        self.board = self.board * (-1)
+
+        # Update components to reflect the change
+        new_components = {1: [], -1: []}
+        new_components[1] = self.components[-1]
+        new_components[-1] = self.components[1]
+
+        self.components = new_components

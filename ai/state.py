@@ -32,3 +32,15 @@ class State:
 
     def __repr__(self):
         return f"{self.player}\n{self.board.board}"
+
+    def encode(self) -> np.array:
+        """Encodes the state for PyTorch."""
+        encoded_state = np.array(
+            (self.board.board == -1, self.board.board == 0, self.board.board == 1)
+        ).astype(np.float32)
+
+        return encoded_state
+
+    def encode_states(states: list["State"]) -> np.array:
+        """Encodes multiple states as single numpy array."""
+        return np.array([state.encode() for state in states]).astype(np.float32)

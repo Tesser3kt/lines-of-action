@@ -9,11 +9,17 @@ import pathlib
 import os
 import sys
 import time
+import torch
+import matplotlib.pyplot as plt
 from loguru import logger
+from collections import defaultdict
 from game.game import Game
 from game.board import Board
-from ai.mcts import MCTS
+from ai.mcts import MCTSParallel
 from ai.state import State
+from ai.model import ResNet
+from ai.alpha_zero import AlphaZero
+from ai.spg import SPG
 
 
 @logger.catch(message="Pygame initialisation failed.")
@@ -50,9 +56,25 @@ def main(config: dict) -> None:
     # currently clicked stone
     active_stone = None
 
-    # Try MCTS search
-    args = {"c": np.sqrt(2), "num_searches": 100}
-    mcts = MCTS(board=game.board, args=args)
+    model = ResNet(
+        board=game.board,
+        num_resblocks=9,
+        num_hidden=128,
+        device=config["agent"]["device"],
+    )
+    model.load_state_dict(
+        torch.load("model_1.pt", map_location=config["agent"]["device"])
+    )
+    model.eval()
+
+    args = {
+        "c": 2,
+        "num_searches": 25,
+        "temperature": 1.25,
+        "dirichlet_epsilon": 0.25,
+        "dirichlet_alpha": 0.1,
+    }
+    mcts = MCTSParallel(board=game.board, model=model, args=args)
 
     while running:
         # store rects to be redrawn this frame
@@ -60,14 +82,25 @@ def main(config: dict) -> None:
 
         # AI plays
         if player == -1:
-            state = State(player=player, board=game.board)
-            mcts_probs = mcts.search(state=state)
-            action = max(mcts_probs.items(), key=lambda x: x[1])[0]
-            moves = game.board.get_all_player_moves(player)
+            # Get action probs
+            neutral_state = State(player=1, board=game.board)
+            neutral_state.board.change_perspective()
+            spg = SPG(board=game.board.copy())
+            mcts.search(states=[neutral_state], selfplay_games=[spg])
 
-            if action not in moves:
-                logger.error("Move {} not available!", action)
-                raise Exception("Move not available!")
+            action_probs = defaultdict(int)
+            for child in spg.root.children:
+                action_probs[child.action_taken] += child.visit_count
+
+            prob_sum = sum(action_probs.values())
+            for child in spg.root.children:
+                action_probs[child.action_taken] /= prob_sum
+
+            action = max(action_probs.items(), key=lambda x: x[1])[0]
+
+            valid_moves = game.board.get_all_player_moves(player)
+            if action not in valid_moves:
+                logger.error("Action {} not permitted.", action)
                 continue
 
             rects_to_redraw += game.move_stone(*action)
@@ -80,11 +113,12 @@ def main(config: dict) -> None:
                     config["game"]["board"]["connection_color"],
                 )
                 pg.display.flip()
-                time.sleep(10)
+                time.sleep(5)
                 running = False
 
             logger.debug("Switching player from {} to {}.", player, -player)
             player = -player
+            print(game.board)
 
         # Human plays
         if player == 1:
@@ -122,13 +156,14 @@ def main(config: dict) -> None:
                                         config["game"]["board"]["connection_color"],
                                     )
                                     pg.display.flip()
-                                    time.sleep(10)
+                                    time.sleep(5)
                                     running = False
                                     break
 
                                 logger.debug(
                                     "Switching player from {} to {}.", player, -player
                                 )
+                                print(game.board)
                                 player = -player
 
                         # Otherwise clear any previous highlights
@@ -155,6 +190,30 @@ def main(config: dict) -> None:
         clock.tick(config["game"]["fps"])
 
     pg.quit()
+
+
+def main_ai(config: dict) -> None:
+    player = 1
+    board = Board()
+
+    args = {
+        "c": 2,
+        "num_searches": 100,
+        "num_iterations": 4,
+        "num_selfplay_iterations": 2000,
+        "num_epochs": 5,
+        "num_parallel": 500,
+        "batch_size": 128,
+        "temperature": 1.25,
+        "dirichlet_epsilon": 0.25,
+        "dirichlet_alpha": 0.1,
+    }
+    model = ResNet(board=board, num_resblocks=9, num_hidden=128, device="cuda")
+    model.eval()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
+
+    az = AlphaZero(model=model, board=board, optimizer=optimizer, args=args)
+    az.learn()
 
 
 if __name__ == "__main__":
@@ -187,4 +246,12 @@ if __name__ == "__main__":
         logger.error("Error reading config file: {}", e)
 
     logger.debug("Config parsed.")
-    main(config=config)
+
+    # Setup torch
+    logger.debug("Setting up torch.")
+
+    torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.manual_seed(0)
+
+    # main(config=config)
+    main_ai(config=config)

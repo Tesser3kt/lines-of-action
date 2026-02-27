@@ -39,7 +39,7 @@
     # https://github.com/pyproject-nix/uv2nix
     python = pkgs.python3.override {
       packageOverrides = self: super: {
-        torch = pkgs.python3.pkgs.torchWithRocm;
+        torch = pkgs.python3.pkgs.torchWithCuda;
       };
     };
   in {
